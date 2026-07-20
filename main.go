@@ -11,11 +11,13 @@ import (
 	"time"
 )
 
+// apiConfig sturct stores the number of times a request given the structs middleware functions is called
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	mux *http.ServeMux
 }
 
+// middlewareMetricsInc increases the count of APIConfig.fileserverHits
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Add(1)
@@ -24,6 +26,7 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	})
 }
 
+// middlewareMetricsReset resets the count of APIConfig.fileserverHits
 func (cfg *apiConfig) middlewareMetricsReset(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Store(0)
@@ -31,6 +34,7 @@ func (cfg *apiConfig) middlewareMetricsReset(next http.Handler) http.Handler {
 	})
 }
 
+// ServeHTTP serves HTML presenting APIConfig.fileserverHits
 func (cfg *apiConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	num := cfg.fileserverHits.Load()
 	w.Header().Set("Content-Type", "text/html charset=utf-8")
@@ -45,6 +49,7 @@ func (cfg *apiConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, str)
 }
 
+// respondWithJson writes the given status code and json payload to http.ResponseWriter
 func respondWithJson(w http.ResponseWriter, code int, payload interface{}) error {
 	response, err := json.Marshal(payload)
 	if err != nil {
@@ -57,10 +62,14 @@ func respondWithJson(w http.ResponseWriter, code int, payload interface{}) error
 	return nil
 }
 
+// respondWithError writes the status code and message into http.ResponseWriter
 func respondWithError(w http.ResponseWriter, code int, msg string) error {
 	return respondWithJson(w, code, map[string]string{"error": msg})
 }
 
+// validateChirp checks the given http.Request body against a set of rules.
+//
+// Writing to http.ResponseWriter with the results
 func validateChirp(w http.ResponseWriter, r *http.Request) {
 	rule := 140
 
@@ -98,6 +107,7 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 	respondWithJson(w, 200, cleaned)
 }
 
+// cleanString replaces censored words. 
 func cleanString(str string) string {
 	strArray := strings.Split(str, " ")
 	var cleanArray []string
@@ -117,6 +127,7 @@ func cleanString(str string) string {
 	return strings.Join(cleanArray, " ")
 }
 
+// main it's the main function
 func main() {
 	logger := log.Default()
 
@@ -138,6 +149,7 @@ func main() {
 	}
 }
 
+// buildMux configures http.ServeMux
 func buildMux(apiCfg *apiConfig) {
 	mux := apiCfg.mux
 	
