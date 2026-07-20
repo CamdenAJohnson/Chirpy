@@ -1,3 +1,4 @@
 *.exe
 *.Identifier
 out
+env.txt
