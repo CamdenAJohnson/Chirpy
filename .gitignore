@@ -2,3 +2,5 @@
 *.Identifier
 out
 env.txt
+.env
+Chirpy

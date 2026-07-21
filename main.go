@@ -1,82 +1,73 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/CamdenAJohnson/Chirpy/internal/database"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type serverConfig struct {
-	Mux *http.ServeMux
 	Addr string
+	Mux *http.ServeMux
+	dbQueries *database.Queries
+	Logger *log.Logger
 }
 
 // Global Variables
 var ServerConfig serverConfig
 var APIConfig apiConfig
 
-// validateChirp checks the given http.Request body against a set of rules.
-//
-// Writing to http.ResponseWriter with the results
-func validateChirp(w http.ResponseWriter, r *http.Request) {
-	rule := 140
+// createUser inserts a new user into the database
+func createUser(w http.ResponseWriter, r *http.Request) {
+	var requestFields struct{ Email string `json:"email"` }
 
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		respondWithError(w, 400, "Something went wrong.")
+		respondWithError(w, http.StatusBadRequest, "Failed to read request body.")
 		return
 	}
 
-	var chirp struct{
-		Body string `json:"body"`
-	}
-
-	if err := json.Unmarshal(data, &chirp); err != nil {
-		respondWithError(w, 400, "Something went wrong.")
+	if err := json.Unmarshal(data, &requestFields); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to parse request body.")
 		return
 	}
 
-	if len(chirp.Body) > rule {
-		respondWithError(w, 400, "Body is to long.")
-		return
-	} else if len(chirp.Body) <= 0 {
-		respondWithError(w, 400, "Empty Body.")
+	if len(requestFields.Email) <= 0 {
+		respondWithError(w, http.StatusBadRequest, "Bad Request: Email not set.")
 		return
 	}
 
-	cleaned := struct {
-		Cleaned_body string `json:"cleaned_body"`
-	}{
-		Cleaned_body: "",
+	if !strings.Contains(requestFields.Email, "@") && !strings.Contains(requestFields.Email, ".") {
+		respondWithError(w, http.StatusBadRequest, "Bad Request: invalid email.")
+		return
 	}
 
-	cleaned.Cleaned_body = cleanString(chirp.Body)
-
-	respondWithJson(w, 200, cleaned)
-}
-
-// cleanString replaces censored words. 
-func cleanString(str string) string {
-	strArray := strings.Split(str, " ")
-	var cleanArray []string
-
-	for _, str := range strArray {
-		strCopy := strings.ToLower(str)
-		switch strCopy {
-			case "kerfuffle":
-				str = strings.ReplaceAll(strCopy, "kerfuffle", "****")
-			case "sharbert":
-				str = strings.ReplaceAll(strCopy, "sharbert", "****")
-			case "fornax":
-				str = strings.ReplaceAll(strCopy, "fornax", "****")
-		}
-		cleanArray = append(cleanArray, str)
+	newUser, err := ServerConfig.dbQueries.CreateUser(r.Context(), requestFields.Email)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to execute db querie.")
+		ServerConfig.Logger.Printf("Failed to execute 'CreateUser' querie: %v", err)
+		return
 	}
-	return strings.Join(cleanArray, " ")
+
+	responsePayload := make(map[string]interface{})
+	responsePayload["id"] = newUser.ID
+	responsePayload["created_at"] = newUser.CreatedAt
+	responsePayload["updated_at"] = newUser.UpdatedAt
+	responsePayload["email"] = newUser.Email
+
+	if err := respondWithJson(w, http.StatusCreated, responsePayload); err != nil {
+		ServerConfig.Logger.Printf("response helper failed to execute: %v", err)
+	}
 }
 
 // Helper functions
@@ -133,9 +124,7 @@ func SetAdminRoutes(router *http.ServeMux) {
 	router.Handle("GET /admin/metrics", &APIConfig)
 
 	// Set the function handler for HTTP POST reqeusts at /admin/reset endpoint
-	router.Handle("POST /admin/reset", APIConfig.middlewareMetricsReset(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})))
+	router.Handle("POST /admin/reset", APIConfig.middlewareMetricsReset(http.HandlerFunc(resetHandler)))
 }
 
 // SetAPIRoutes Sets the routes for HTTP request starting with "/api"
@@ -149,15 +138,24 @@ func SetAPIRoutes(router *http.ServeMux) {
 
 	// Set the function handler for HTTP POST reqeusts at /api/validate_chirp endpoint
 	router.HandleFunc("POST /api/validate_chirp", validateChirp)
+
+	// Set the function handler for HTTP POST requests at "/api/users endpoint"
+	router.HandleFunc("POST /api/users", createUser)
 }
 
 // main it's the main function
 func main() {
-	logger := log.Default()
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil { log.Fatal(err) }
 	
 	// Set Server Settings
+	ServerConfig = serverConfig{}
 	ServerConfig.Addr = ":8080"
 	ServerConfig.Mux = http.NewServeMux()
+	ServerConfig.dbQueries = database.New(db)
+	ServerConfig.Logger = log.Default()
 
 	// Configure the http.ServeMux
 	SetAppRoutes(ServerConfig.Mux)
@@ -171,8 +169,8 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 	}
 
-	logger.Println("Starting on port :8080")
+	ServerConfig.Logger.Println("Starting on port :8080")
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Fatalf("Server error: %v\n", err)
+		ServerConfig.Logger.Fatalf("Server error: %v\n", err)
 	}
 }
