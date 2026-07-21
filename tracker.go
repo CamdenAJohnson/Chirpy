@@ -48,6 +48,7 @@ func (cfg *apiConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, str)
 }
 
+// resetHandler clears all stored data.
 func resetHandler(w http.ResponseWriter, r *http.Request) {
 	if err := ServerConfig.dbQueries.ClearUsers(r.Context()); err != nil {
 		ServerConfig.Logger.Printf("Failed to execture db querie: %v", err)
