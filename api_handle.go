@@ -5,6 +5,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/CamdenAJohnson/Chirpy/internal/database"
+	"github.com/google/uuid"
 )
 
 // SetAPIRoutes Sets the routes for HTTP request starting with "/api"
@@ -13,7 +16,10 @@ func SetAPIRoutes(router *http.ServeMux) {
 	router.HandleFunc("GET /api/healthz", healthzHandle)
 
 	// Set the function handler for HTTP POST reqeusts at /api/validate_chirp endpoint
-	router.HandleFunc("POST /api/validate_chirp", validateChirp)
+	//router.HandleFunc("POST /api/validate_chirp", validateChirp)
+
+	// Set the function handler for HTTP POST requests at /api/chirps endpoint
+	router.HandleFunc("POST /api/chirps", createChirp)
 
 	// Set the function handler for HTTP POST requests at "/api/users endpoint"
 	router.HandleFunc("POST /api/users", createUser)
@@ -29,7 +35,7 @@ func healthzHandle(w http.ResponseWriter, r *http.Request) {
 // createUser inserts a new user into the database
 func createUser(w http.ResponseWriter, r *http.Request) {
 	var requestFields struct{ Email string `json:"email"` }
-	
+
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Failed to read request body.")
@@ -69,46 +75,6 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// validateChirp checks the given http.Request body against a set of rules.
-//
-// Writing to http.ResponseWriter with the results
-func validateChirp(w http.ResponseWriter, r *http.Request) {
-	rule := 140
-
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
-		respondWithError(w, 400, "Something went wrong.")
-		return
-	}
-
-	var chirp struct{
-		Body string `json:"body"`
-	}
-
-	if err := json.Unmarshal(data, &chirp); err != nil {
-		respondWithError(w, 400, "Something went wrong.")
-		return
-	}
-
-	if len(chirp.Body) > rule {
-		respondWithError(w, 400, "Body is to long.")
-		return
-	} else if len(chirp.Body) <= 0 {
-		respondWithError(w, 400, "Empty Body.")
-		return
-	}
-
-	cleaned := struct {
-		Cleaned_body string `json:"cleaned_body"`
-	}{
-		Cleaned_body: "",
-	}
-
-	cleaned.Cleaned_body = cleanString(chirp.Body)
-
-	respondWithJson(w, 200, cleaned)
-}
-
 // cleanString replaces censored words. 
 func cleanString(str string) string {
 	strArray := strings.Split(str, " ")
@@ -127,4 +93,62 @@ func cleanString(str string) string {
 		cleanArray = append(cleanArray, str)
 	}
 	return strings.Join(cleanArray, " ")
+}
+
+// createChirp validates the reqeust and inserts the data into the db
+func createChirp(w http.ResponseWriter, r *http.Request) {
+	maxLength := 140
+
+	var requestFields struct{
+		Body string `json:"body"`
+		UserID string `json:"user_id"`
+	}
+
+	var chirpParams database.CreateChirpParams
+
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to read request body.")
+		return
+	}
+
+	if err := json.Unmarshal(data, &requestFields); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to parse request body.")
+		return
+	}
+
+	if len(requestFields.Body) > maxLength {
+		respondWithError(w, http.StatusBadRequest, "Bad Request: chirp is to long.")
+		return
+	}
+	
+	if len(requestFields.Body) <= 0 {
+		respondWithError(w, http.StatusBadRequest, "Bad Request: Chirp can not be empty.")
+		return
+	}
+
+	userId, err := uuid.Parse(requestFields.UserID)
+	if err != nil {
+		ServerConfig.Logger.Printf("Failed to parse user uuid: %v", err)
+		respondWithError(w, http.StatusBadRequest, "Bad Request: Failed to parse userid.")
+		return
+	}
+
+	chirpParams.Body = cleanString(requestFields.Body)
+	chirpParams.UserID = userId
+	chirp, err := ServerConfig.dbQueries.CreateChirp(r.Context(), chirpParams)
+	if err != nil {
+		ServerConfig.Logger.Printf("Failed to execute db querie: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to execute querie.")
+		return
+	}
+
+	responsePayload := make(map[string]interface{})
+	responsePayload["id"] = chirp.ID
+	responsePayload["created_at"] = chirp.CreatedAt
+	responsePayload["updated_at"] = chirp.UpdatedAt
+	responsePayload["body"] = chirp.Body
+	responsePayload["user_id"] = chirp.UserID
+
+	respondWithJson(w, http.StatusCreated, responsePayload)
 }
