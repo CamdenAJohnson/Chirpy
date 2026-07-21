@@ -10,17 +10,20 @@ import (
 // SetAPIRoutes Sets the routes for HTTP request starting with "/api"
 func SetAPIRoutes(router *http.ServeMux) {
 	// Set the function handler for HTTP GET requests at /api/healthz endpoint
-	router.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
+	router.HandleFunc("GET /api/healthz", healthzHandle)
 
 	// Set the function handler for HTTP POST reqeusts at /api/validate_chirp endpoint
 	router.HandleFunc("POST /api/validate_chirp", validateChirp)
 
 	// Set the function handler for HTTP POST requests at "/api/users endpoint"
 	router.HandleFunc("POST /api/users", createUser)
+}
+
+// healthzHandle responeds with Status OK
+func healthzHandle(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
 }
 
 // createUser inserts a new user into the database

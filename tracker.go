@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"sync/atomic"
 )
 
@@ -24,10 +23,6 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 // middlewareMetricsReset resets the count of APIConfig.fileserverHits
 func (cfg *apiConfig) middlewareMetricsReset(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if platform := os.Getenv("PLATFORM"); platform != "dev" {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
 		cfg.fileserverHits.Store(0)
 		next.ServeHTTP(w, r)
 	})
@@ -46,14 +41,4 @@ func (cfg *apiConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 </html>`, num)
 
 	fmt.Fprint(w, str)
-}
-
-// resetHandler clears all stored data.
-func resetHandler(w http.ResponseWriter, r *http.Request) {
-	if err := ServerConfig.dbQueries.ClearUsers(r.Context()); err != nil {
-		ServerConfig.Logger.Printf("Failed to execture db querie: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
 }
