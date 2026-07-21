@@ -29,7 +29,7 @@ func healthzHandle(w http.ResponseWriter, r *http.Request) {
 // createUser inserts a new user into the database
 func createUser(w http.ResponseWriter, r *http.Request) {
 	var requestFields struct{ Email string `json:"email"` }
-
+	
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Failed to read request body.")
