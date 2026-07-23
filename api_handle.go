@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/CamdenAJohnson/Chirpy/internal/database"
 	"github.com/google/uuid"
@@ -15,8 +16,11 @@ func SetAPIRoutes(router *http.ServeMux) {
 	// Set the function handler for HTTP GET requests at /api/healthz endpoint
 	router.HandleFunc("GET /api/healthz", healthzHandle)
 
-	// Set the function handler for HTTP POST reqeusts at /api/validate_chirp endpoint
-	//router.HandleFunc("POST /api/validate_chirp", validateChirp)
+	// Set the function handler for HTTP GET reqeusts at /api/chirps/ endpoint
+	router.HandleFunc("GET /api/chirps", getChirps)
+
+	// Set the function handler for HTTP GET requests at /api/chirps/{chirpid} endpoint
+	router.HandleFunc("GET /api/chirps/{chirpid}", getChirpsById)
 
 	// Set the function handler for HTTP POST requests at /api/chirps endpoint
 	router.HandleFunc("POST /api/chirps", createChirp)
@@ -151,4 +155,76 @@ func createChirp(w http.ResponseWriter, r *http.Request) {
 	responsePayload["user_id"] = chirp.UserID
 
 	respondWithJson(w, http.StatusCreated, responsePayload)
+}
+
+func getChirps(w http.ResponseWriter, r *http.Request) {
+	var chirps struct {
+		Chirp []struct {
+			Id uuid.UUID `json:"id"`
+			Created_at time.Time `json:"created_at"`
+			Updated_at time.Time `json:"updated_at"`
+			Body string `json:"body"`
+			User_id uuid.UUID `json:"user_id"`
+		}
+	}
+
+	chirpsData, err := ServerConfig.dbQueries.GetChirps(r.Context())
+	if err != nil {
+		ServerConfig.Logger.Printf("Error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to execute querie.")
+		return
+	}
+
+	for _, v := range chirpsData {
+		chirp := struct {
+			Id uuid.UUID `json:"id"`
+			Created_at time.Time `json:"created_at"`
+			Updated_at time.Time `json:"updated_at"`
+			Body string `json:"body"`
+			User_id uuid.UUID `json:"user_id"`
+		}{
+			Id: v.ID,
+			Created_at: v.CreatedAt,
+			Updated_at: v.UpdatedAt,
+			Body: v.Body,
+			User_id: v.UserID,
+		}
+
+		chirps.Chirp = append(chirps.Chirp, chirp)
+	}
+
+	if err := respondWithJson(w, http.StatusOK, chirps.Chirp); err != nil {
+		ServerConfig.Logger.Printf("Error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Parser Failed.")
+	}
+}
+
+func getChirpsById(w http.ResponseWriter, r *http.Request) {
+	var responseData struct {
+		Id uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body string `json:"body"`
+		UserId uuid.UUID `json:"user_id"`
+	}
+	chirpId := r.PathValue("chirpid")
+	parsedUUID, err := uuid.Parse(chirpId)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to parse chirp id.")
+		return
+	}
+
+	chirp, err := ServerConfig.dbQueries.GetChirpsById(r.Context(), parsedUUID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound,  "Chirp does not exist.")
+		return
+	}
+
+	responseData.Id = chirp.ID
+	responseData.CreatedAt = chirp.CreatedAt
+	responseData.UpdatedAt = chirp.UpdatedAt
+	responseData.Body = chirp.Body
+	responseData.UserId = chirp.UserID
+
+	respondWithJson(w, http.StatusOK, responseData)
 }
