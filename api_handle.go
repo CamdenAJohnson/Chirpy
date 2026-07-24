@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CamdenAJohnson/Chirpy/internal/auth"
 	"github.com/CamdenAJohnson/Chirpy/internal/database"
 	"github.com/google/uuid"
 )
@@ -27,6 +28,9 @@ func SetAPIRoutes(router *http.ServeMux) {
 
 	// Set the function handler for HTTP POST requests at "/api/users endpoint"
 	router.HandleFunc("POST /api/users", createUser)
+
+	// Set the function handler for HTTP POST request at "/api/login endpoint"
+	router.HandleFunc("POST /api/login", loginUser)
 }
 
 // healthzHandle responeds with Status OK
@@ -38,7 +42,10 @@ func healthzHandle(w http.ResponseWriter, r *http.Request) {
 
 // createUser inserts a new user into the database
 func createUser(w http.ResponseWriter, r *http.Request) {
-	var requestFields struct{ Email string `json:"email"` }
+	var requestFields struct{
+		Email string `json:"email"`
+		Password string `json:"password"`		
+	}
 
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -51,8 +58,8 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(requestFields.Email) <= 0 {
-		respondWithError(w, http.StatusBadRequest, "Bad Request: Email not set.")
+	if len(requestFields.Email) <= 0  || len(requestFields.Password) <= 0{
+		respondWithError(w, http.StatusBadRequest, "Bad Request: Email or Password not set.")
 		return
 	}
 
@@ -61,7 +68,19 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newUser, err := ServerConfig.dbQueries.CreateUser(r.Context(), requestFields.Email)
+	hashed_password, err := auth.HashPassword(requestFields.Password)
+	if err != nil || len(hashed_password) <= 0 {
+		ServerConfig.Logger.Printf("Failed to has password: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to hash password.")
+		return
+	}
+
+	dbParams := database.CreateUserParams{
+		Email: requestFields.Email,
+		HashedPassword: hashed_password,
+	}
+
+	newUser, err := ServerConfig.dbQueries.CreateUser(r.Context(), dbParams)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to execute db querie.")
 		ServerConfig.Logger.Printf("Failed to execute 'CreateUser' querie: %v", err)
@@ -79,24 +98,50 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// cleanString replaces censored words. 
-func cleanString(str string) string {
-	strArray := strings.Split(str, " ")
-	var cleanArray []string
-
-	for _, str := range strArray {
-		strCopy := strings.ToLower(str)
-		switch strCopy {
-			case "kerfuffle":
-				str = strings.ReplaceAll(strCopy, "kerfuffle", "****")
-			case "sharbert":
-				str = strings.ReplaceAll(strCopy, "sharbert", "****")
-			case "fornax":
-				str = strings.ReplaceAll(strCopy, "fornax", "****")
-		}
-		cleanArray = append(cleanArray, str)
+// loginUser 
+func loginUser(w http.ResponseWriter, r *http.Request) {
+	var requestFields struct {
+		Email string `json:"email"`
+		Password string `json:"password"`
 	}
-	return strings.Join(cleanArray, " ")
+
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to read request body.")
+		return
+	}
+
+	if err := json.Unmarshal(data, &requestFields); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to parse request body.")
+		return
+	}
+
+	user, err := ServerConfig.dbQueries.GetUserByEmail(r.Context(), requestFields.Email)
+	if err != nil {
+		respondWithError(w, http.StatusNoContent, "No user linked with email.")
+		return
+	}
+
+	hashed_password, err := auth.CheckPasswordHash(requestFields.Password, user.HashedPassword)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "")
+		return
+	}
+
+	if !hashed_password {
+		respondWithJson(w, http.StatusUnauthorized, "Incorrect password.")
+		return
+	}
+
+	responsePayload := make(map[string]interface{})
+	responsePayload["id"] = user.ID
+	responsePayload["created_at"] = user.CreatedAt
+	responsePayload["updated_at"] = user.UpdatedAt
+	responsePayload["email"] = user.Email
+
+	if err := respondWithJson(w, http.StatusOK, responsePayload); err != nil {
+		ServerConfig.Logger.Printf("response helper failed to execute: %v", err)
+	}
 }
 
 // createChirp validates the reqeust and inserts the data into the db
